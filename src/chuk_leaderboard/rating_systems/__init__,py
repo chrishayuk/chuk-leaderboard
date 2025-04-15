@@ -1,0 +1,33 @@
+# chuk_leaderboard/rating_systems/__init__.py
+"""
+Rating systems package for the leaderboard system.
+
+This package contains various rating system implementations that can be used
+to calculate ratings for participants in competitions. All rating systems
+implement the RatingSystem interface defined in rating_system.py.
+
+Available rating systems:
+- Elo: Classic Elo rating system (elo.py)
+- Glicko2: Glicko-2 rating system with rating deviation and volatility (glicko2.py)
+"""
+
+# Import the base classes and registry first
+from chuk_leaderboard.rating_systems.rating_system import RatingSystem
+from chuk_leaderboard.rating_systems.registry import RatingSystemRegistry, get_rating_system
+
+# Then import implementations - these will register themselves with the registry
+from chuk_leaderboard.rating_systems.elo import EloRatingSystem
+from chuk_leaderboard.rating_systems.glicko2 import Glicko2RatingSystem
+
+# TrueSkill and other rating systems can be added here in the future
+
+__all__ = [
+    # Base interface
+    'RatingSystem',
+    'RatingSystemRegistry',
+    'get_rating_system',
+    
+    # Rating system implementations
+    'EloRatingSystem',
+    'Glicko2RatingSystem',
+]
