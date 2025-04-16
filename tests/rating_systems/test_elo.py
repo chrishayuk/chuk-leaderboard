@@ -2,6 +2,7 @@ import math
 import pytest
 from chuk_leaderboard.rating_systems.elo import EloRatingSystem
 
+
 def test_get_default_rating():
     """
     Verify that get_default_rating returns the expected default rating.
@@ -15,6 +16,7 @@ def test_get_default_rating():
     custom_default = custom_elo.get_default_rating()
     assert custom_default == 2000
 
+
 def test_get_display_name():
     """
     Test that the display name includes the K-factor.
@@ -24,6 +26,7 @@ def test_get_display_name():
     
     elo2 = EloRatingSystem(k_factor=16)
     assert elo2.get_display_name() == "Elo (K=16)"
+
 
 def test_no_outcomes():
     """
@@ -35,6 +38,7 @@ def test_no_outcomes():
     
     # The rating should be unchanged.
     assert new_rating == rating
+
 
 def test_expected_outcome():
     """
@@ -48,16 +52,17 @@ def test_expected_outcome():
     
     # Test: higher rating should have higher win probability
     higher_probability = elo.expected_outcome(1600, 1400)
-    assert higher_probability > 0.5 and higher_probability < 1.0
+    assert 0.5 < higher_probability < 1.0
     
     # Test: lower rating should have lower win probability
     lower_probability = elo.expected_outcome(1400, 1600)
-    assert lower_probability < 0.5 and lower_probability > 0.0
+    assert 0.0 < lower_probability < 0.5
     
     # Test: symmetry property - P(A beats B) + P(B beats A) should be 1
     p_a_beats_b = elo.expected_outcome(1700, 1500)
     p_b_beats_a = elo.expected_outcome(1500, 1700)
     assert math.isclose(p_a_beats_b + p_b_beats_a, 1.0, abs_tol=1e-6)
+
 
 @pytest.mark.parametrize("result", [1.0, 0.5, 0.0])
 def test_calculate_rating_single_outcome(result):
@@ -88,6 +93,7 @@ def test_calculate_rating_single_outcome(result):
     else:  # Result matches expectation
         assert math.isclose(new_rating, rating, abs_tol=1e-6)
 
+
 def test_calculate_rating_change():
     """
     Test the rating change calculation for a single match.
@@ -100,85 +106,58 @@ def test_calculate_rating_change():
     
     # Loss against weaker opponent (expected > 0.5)
     change = elo.calculate_rating_change(1600, 1400, 0.0)
-    assert change < 0  # Should lose more rating than expected
+    assert change < 0  # Should lose rating
     
     # Draw against stronger opponent (expected < 0.5)
     change = elo.calculate_rating_change(1400, 1600, 0.5)
     assert change > 0  # Should gain rating
 
+
 def test_calculate_rating_multiple_outcomes():
     """
     Test calculate_rating when multiple match outcomes are provided.
-    This verifies that the aggregation over several matches works as expected.
     """
     elo = EloRatingSystem(k_factor=24)
     rating = 1500
-    
-    # Three outcomes: win against stronger, loss against weaker, draw against equal
     outcomes = [(1600, 1.0), (1400, 0.0), (1500, 0.5)]
     
-    # Calculate expected changes for each match
-    expected_changes = []
-    for opponent_rating, result in outcomes:
-        expected = elo.expected_outcome(rating, opponent_rating)
-        expected_changes.append(24 * (result - expected))
+    # Calculate expected new rating
+    expected_new_rating = rating
+    for opp, res in outcomes:
+        exp = elo.expected_outcome(rating, opp)
+        expected_new_rating += 24 * (res - exp)
     
-    expected_new_rating = rating + sum(expected_changes)
-    
-    # Calculate actual new rating
     new_rating = elo.calculate_rating(rating, outcomes)
-    
-    # The new rating should match our expectation
     assert math.isclose(new_rating, expected_new_rating, abs_tol=1e-6)
+
 
 def test_adjust_k_factor():
     """
     Test that the adjust_k_factor method returns different K values based on rating.
     """
     elo = EloRatingSystem()
-    
-    # Below 2100 should get K=32
     assert elo.adjust_k_factor(1500) == 32
     assert elo.adjust_k_factor(2099) == 32
-    
-    # Between 2100 and 2400 should get K=24
     assert elo.adjust_k_factor(2100) == 24
-    assert elo.adjust_k_factor(2300) == 24
     assert elo.adjust_k_factor(2399) == 24
-    
-    # Above 2400 should get K=16
     assert elo.adjust_k_factor(2400) == 16
     assert elo.adjust_k_factor(2500) == 16
+
 
 def test_get_rating_with_dynamic_k():
     """
     Test the dynamic K-factor rating calculation.
     """
     elo = EloRatingSystem()
-    
-    # Calculate new rating with dynamic K for a player just crossing the 2100 threshold
     rating = 2090
-    outcomes = [(2000, 1.0)]  # Win against weaker opponent
-    
-    # First with standard K=32
-    new_rating_standard = elo.calculate_rating(rating, outcomes)
-    
-    # Then with dynamic K
-    new_rating_dynamic = elo.get_rating_with_dynamic_k(rating, outcomes)
-    
-    # Dynamic K should use K=32 for this rating
-    assert math.isclose(new_rating_standard, new_rating_dynamic, abs_tol=1e-6)
-    
-    # Now test with a higher-rated player (should use K=24)
+    outcomes = [(2000, 1.0)]
+    new_standard = elo.calculate_rating(rating, outcomes)
+    new_dynamic = elo.get_rating_with_dynamic_k(rating, outcomes)
+    assert math.isclose(new_standard, new_dynamic, abs_tol=1e-6)
+
     rating = 2200
-    outcomes = [(2000, 1.0)]  # Win against weaker opponent
-    
-    # Calculate with explicit K=24
-    elo_explicit = EloRatingSystem(k_factor=24)
-    new_rating_explicit = elo_explicit.calculate_rating(rating, outcomes)
-    
-    # Calculate with dynamic K
-    new_rating_dynamic = elo.get_rating_with_dynamic_k(rating, outcomes)
-    
-    # Should be the same since dynamic K should use K=24 for this rating
-    assert math.isclose(new_rating_explicit, new_rating_dynamic, abs_tol=1e-6)
+    outcomes = [(2000, 1.0)]
+    explicit_elo = EloRatingSystem(k_factor=24)
+    new_explicit = explicit_elo.calculate_rating(rating, outcomes)
+    new_dynamic = elo.get_rating_with_dynamic_k(rating, outcomes)
+    assert math.isclose(new_explicit, new_dynamic, abs_tol=1e-6)

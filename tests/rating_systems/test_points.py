@@ -3,6 +3,7 @@ import pytest
 from typing import List, Tuple
 from chuk_leaderboard.rating_systems.points_based import PointsBasedRankingSystem
 
+
 def test_get_default_rating():
     """
     Verify that get_default_rating returns the expected default points and empty history.
@@ -19,6 +20,7 @@ def test_get_default_rating():
     assert custom_default[0] == 100.0
     assert custom_default[1] == []
 
+
 def test_get_display_name():
     """
     Test that the display name is correctly generated.
@@ -30,6 +32,7 @@ def test_get_display_name():
     # Test with rank-based system
     rank_system = PointsBasedRankingSystem(rank_points=[10, 8, 6, 4, 2])
     assert rank_system.get_display_name() == "Points-Based (Ranked)"
+
 
 def test_no_outcomes():
     """
@@ -48,6 +51,7 @@ def test_no_outcomes():
     new_total, new_history = points_system.calculate_rating(current_rating, [])
     assert new_total == current_rating[0]
     assert new_history == current_rating[1]
+
 
 def test_calculate_rating_single_outcome():
     """
@@ -71,6 +75,7 @@ def test_calculate_rating_single_outcome():
     assert new_total == current_rating[0] + 35.0
     assert new_history == current_rating[1] + [35.0]
 
+
 def test_calculate_rating_multiple_outcomes():
     """
     Test calculate_rating with multiple outcomes.
@@ -84,6 +89,7 @@ def test_calculate_rating_multiple_outcomes():
     new_total, new_history = points_system.calculate_rating(current_rating, outcomes)
     assert new_total == current_rating[0] + sum(outcomes)
     assert new_history == current_rating[1] + outcomes
+
 
 def test_rank_points():
     """
@@ -103,6 +109,7 @@ def test_rank_points():
     assert new_total == 24.0
     assert new_history == outcomes
 
+
 def test_bonus_points():
     """
     Test that bonus points are correctly applied.
@@ -119,6 +126,7 @@ def test_bonus_points():
     # Expected points: 80 + (120+10) + 90 + (150+10) = 460
     assert new_total == 460.0
     assert new_history == outcomes  # History stores original scores
+
 
 def test_expected_outcome_with_total_points():
     """
@@ -143,6 +151,7 @@ def test_expected_outcome_with_total_points():
     prob2 = points_system.expected_outcome(1000.0, 1200.0)
     assert math.isclose(prob1 + prob2, 1.0, abs_tol=1e-6)
 
+
 def test_expected_outcome_with_history_weight():
     """
     Test expected outcome calculation with history weight.
@@ -162,6 +171,7 @@ def test_expected_outcome_with_history_weight():
     # Due to recent performance weight, player2 should have higher probability
     # despite lower total points
     assert prob < 0.5
+
 
 def test_project_season_finish():
     """
@@ -197,6 +207,7 @@ def test_project_season_finish():
     # Max points: 300 + (40 * 6) = 540
     assert math.isclose(projection["max_points"], 540.0, abs_tol=1e-6)
 
+
 def test_get_trend():
     """
     Test trend calculation.
@@ -222,6 +233,7 @@ def test_get_trend():
     history = [25.0, 30.0, 35.0]
     trend = points_system.get_trend(history)
     assert trend == "stable"  # Default with insufficient data
+
 
 def test_rank_participants():
     """

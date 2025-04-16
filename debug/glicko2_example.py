@@ -1,506 +1,318 @@
-# debug/glicko2_example.py
-import math
-import random
-import os
-import sys
-import argparse
-from typing import List, Dict, Any, Optional, Tuple
+#!/usr/bin/env python3
+"""
+Improved Glicko‑2 demo runner.
 
-# Add the project root to the Python path if needed
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+* Automatic rating‑system registration (import side‑effect).
+* Symmetric rating updates for every head‑to‑head so both players use the
+  same pre‑match snapshot.
+* Shared CLI helper and deterministic per‑example RNG for reproducibility.
+* Five examples:
+  1. Basic rating changes
+  2. Rating convergence toward "true" skill
+  3. Effect of inactivity on RD
+  4. Convergence from different starting ratings
+  5. Expected‑outcome table
 
-# First, manually import and register the rating systems to ensure they're available
-from chuk_leaderboard.rating_systems.glicko2 import Glicko2RatingSystem
-from chuk_leaderboard.rating_systems.registry import RatingSystemRegistry
+Run e.g.:
+    uv run debug/glicko2_example.py                # all examples
+    uv run debug/glicko2_example.py -e 3 5         # only examples 3 & 5
+"""
 
-# Explicitly register the rating system
-RatingSystemRegistry.register("glicko2", Glicko2RatingSystem)
+from __future__ import annotations
+from typing import Dict, Tuple
+import argparse, math, os, random, sys, textwrap
 
-# Now import other components
-from chuk_leaderboard.rating_systems.registry import get_rating_system
+# --------------------------------------------------------------------------- #
+# Import project root                                                       #
+# --------------------------------------------------------------------------- #
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+# Importing the module automatically registers the rating system
+from chuk_leaderboard.rating_systems import glicko2  # noqa: F401
+from chuk_leaderboard.rating_systems.registry import (
+    get_rating_system,
+    RatingSystemRegistry,
+)
 from chuk_leaderboard.visualizers.rating_history_visualizer import RatingHistoryVisualizer
 from chuk_leaderboard.visualizers.rating_comparison_visualizer import RatingComparisonVisualizer
 from chuk_leaderboard.visualizers.expected_outcome_visualizer import ExpectedOutcomeVisualizer
 
-def print_rating_info(name: str, rating: float, rd: float, vol: float) -> None:
-    """Print formatted rating information for a player."""
-    print(f"{name}: Rating = {rating:.1f}, RD = {rd:.1f}, Vol = {vol:.4f}")
+# --------------------------------------------------------------------------- #
+# Helpers                                                                   #
+# --------------------------------------------------------------------------- #
+
+def pair_update(
+    system, a: Tuple[float, float, float], b: Tuple[float, float, float], result_a: float
+) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+    """Return updated tuples (new_a, new_b) for head-to-head match."""
+    result_b = 1.0 - result_a
+    new_a = system.calculate_rating(a, [(b[0], b[1], result_a)])
+    new_b = system.calculate_rating(b, [(a[0], a[1], result_b)])
+    return new_a, new_b
 
 
-def example_1_basic(output_dir: str):
-    """
-    Basic example showing the rating changes after a few matches.
-    """
+def rng(seed_offset: int) -> random.Random:
+    """Deterministic RNG per example."""
+    return random.Random(240 + seed_offset)
+
+# --------------------------------------------------------------------------- #
+# Example 1 – Basic                                                          #
+# --------------------------------------------------------------------------- #
+
+def example_1_basic(out_dir: str) -> None:
     print("\n=== EXAMPLE 1: BASIC RATING CHANGES ===")
-    
-    # Initialize rating system
-    glicko = get_rating_system("glicko2")
-    
-    # Set up visualizer
-    visualizer = RatingHistoryVisualizer("Basic Rating Changes (Glicko2)", output_dir)
-    
-    # Initial ratings for two players
-    default_rating = glicko.get_default_rating()
-    playerA_rating, playerA_rd, playerA_vol = default_rating
-    playerB_rating, playerB_rd, playerB_vol = default_rating
-    
-    # Track initial ratings
-    visualizer.track_with_explicit_values("Player A", playerA_rating, playerA_rd, playerA_vol)
-    visualizer.track_with_explicit_values("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
+    system = get_rating_system("glicko2")
+    vis = RatingHistoryVisualizer("Basic Rating Changes (Glicko-2)", out_dir)
+
+    a = system.get_default_rating()
+    b = system.get_default_rating()
+    vis.track_with_explicit_values("Player A", *a)
+    vis.track_with_explicit_values("Player B", *b)
+
+    def show(label: str, vals: Tuple[float, float, float]) -> None:
+        print(f"{label}: Rating={vals[0]:.1f}, RD={vals[1]:.1f}, Vol={vals[2]:.4f}")
+
     print("Initial ratings:")
-    print_rating_info("Player A", playerA_rating, playerA_rd, playerA_vol)
-    print_rating_info("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    # Match 1: Player A wins
-    print("\nMatch 1: Player A wins")
-    playerA_rating, playerA_rd, playerA_vol = glicko.calculate_rating(
-        (playerA_rating, playerA_rd, playerA_vol), 
-        [(playerB_rating, playerB_rd, 1.0)]
-    )
-    
-    playerB_rating, playerB_rd, playerB_vol = glicko.calculate_rating(
-        (playerB_rating, playerB_rd, playerB_vol), 
-        [(playerA_rating, playerA_rd, 0.0)]
-    )
-    
-    # Track ratings
-    visualizer.track_with_explicit_values("Player A", playerA_rating, playerA_rd, playerA_vol)
-    visualizer.track_with_explicit_values("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    print("After Match 1:")
-    print_rating_info("Player A", playerA_rating, playerA_rd, playerA_vol)
-    print_rating_info("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    # Match 2: Player B wins
-    print("\nMatch 2: Player B wins")
-    playerA_rating, playerA_rd, playerA_vol = glicko.calculate_rating(
-        (playerA_rating, playerA_rd, playerA_vol), 
-        [(playerB_rating, playerB_rd, 0.0)]
-    )
-    
-    playerB_rating, playerB_rd, playerB_vol = glicko.calculate_rating(
-        (playerB_rating, playerB_rd, playerB_vol), 
-        [(playerA_rating, playerA_rd, 1.0)]
-    )
-    
-    # Track ratings
-    visualizer.track_with_explicit_values("Player A", playerA_rating, playerA_rd, playerA_vol)
-    visualizer.track_with_explicit_values("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    print("After Match 2:")
-    print_rating_info("Player A", playerA_rating, playerA_rd, playerA_vol)
-    print_rating_info("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    # Match 3: Draw
-    print("\nMatch 3: Draw")
-    playerA_rating, playerA_rd, playerA_vol = glicko.calculate_rating(
-        (playerA_rating, playerA_rd, playerA_vol), 
-        [(playerB_rating, playerB_rd, 0.5)]
-    )
-    
-    playerB_rating, playerB_rd, playerB_vol = glicko.calculate_rating(
-        (playerB_rating, playerB_rd, playerB_vol), 
-        [(playerA_rating, playerA_rd, 0.5)]
-    )
-    
-    # Track ratings
-    visualizer.track_with_explicit_values("Player A", playerA_rating, playerA_rd, playerA_vol)
-    visualizer.track_with_explicit_values("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    print("After Match 3:")
-    print_rating_info("Player A", playerA_rating, playerA_rd, playerA_vol)
-    print_rating_info("Player B", playerB_rating, playerB_rd, playerB_vol)
-    
-    # Generate visualization
-    visualizer.plot()
-    visualizer.save("glicko2_basic_rating_changes.png")
+    show("Player A", a)
+    show("Player B", b)
 
+    for match, res_a in [(1, 1.0), (2, 0.0), (3, 0.5)]:
+        outcome = "wins" if res_a == 1.0 else "draws" if res_a == 0.5 else "loses"
+        print(f"\nMatch {match}: Player A {outcome}")
+        a, b = pair_update(system, a, b, res_a)
+        vis.track_with_explicit_values("Player A", *a)
+        vis.track_with_explicit_values("Player B", *b)
+        show("Player A", a)
+        show("Player B", b)
 
-def example_2_rating_convergence(output_dir: str):
-    """
-    Shows how ratings converge over many matches between players of different true skill.
-    """
+    vis.plot(); vis.save("glicko2_basic.png")
+
+# --------------------------------------------------------------------------- #
+# Example 2 – Rating Convergence                                              #
+# --------------------------------------------------------------------------- #
+
+def example_2_convergence(out_dir: str) -> None:
     print("\n=== EXAMPLE 2: RATING CONVERGENCE ===")
-    
-    # Initialize rating system
-    glicko = get_rating_system("glicko2")
-    
-    # Set up visualizer
-    visualizer = RatingHistoryVisualizer("Rating Convergence (Glicko2)", output_dir)
-    comparison = RatingComparisonVisualizer("True Skill vs. Final Rating (Glicko2)", output_dir)
-    
-    # Get default ratings
-    default_rating, default_rd, default_vol = glicko.get_default_rating()
-    
-    # Initial ratings for players
-    players = {
-        "Strong": {"rating": default_rating, "rd": default_rd, "vol": default_vol, "true_skill": 1800},
-        "Medium": {"rating": default_rating, "rd": default_rd, "vol": default_vol, "true_skill": 1500},
-        "Weak": {"rating": default_rating, "rd": default_rd, "vol": default_vol, "true_skill": 1200},
+    system = get_rating_system("glicko2")
+    r = rng(2)
+
+    vis = RatingHistoryVisualizer("Glicko-2 Convergence", out_dir)
+    cmp_vis = RatingComparisonVisualizer("True vs Final Rating (Glicko-2)", out_dir)
+
+    base = system.get_default_rating()
+    players: Dict[str, Dict[str, float]] = {
+        "Strong": {"rating": base[0], "rd": base[1], "vol": base[2], "true": 1800},
+        "Medium": {"rating": base[0], "rd": base[1], "vol": base[2], "true": 1500},
+        "Weak": {"rating": base[0], "rd": base[1], "vol": base[2], "true": 1200},
     }
-    
-    # Print initial ratings
-    print("Initial ratings:")
+
+    pairs = [("Strong", "Medium"), ("Strong", "Weak"), ("Medium", "Weak")]
     for name, data in players.items():
-        print_rating_info(name, data["rating"], data["rd"], data["vol"])
-        visualizer.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-    
-    # Simulate 30 rounds of matches
-    for round_num in range(1, 31):
-        print(f"\nRound {round_num}:")
-        
-        # All players play against each other
-        player_pairs = [
-            ("Strong", "Medium"),
-            ("Strong", "Weak"),
-            ("Medium", "Weak")
-        ]
-        
-        for player1_name, player2_name in player_pairs:
-            player1 = players[player1_name]
-            player2 = players[player2_name]
-            
-            # Determine match outcome based on true skill
-            # This simulates the "true" outcome with some randomness
-            skill_diff = player1["true_skill"] - player2["true_skill"]
-            win_prob = 1.0 / (1.0 + math.exp(-skill_diff / 400.0))
-            result = 1.0 if random.random() < win_prob else 0.0
-            
-            # Update player1's rating
-            new_rating = glicko.calculate_rating(
-                (player1["rating"], player1["rd"], player1["vol"]),
-                [(player2["rating"], player2["rd"], result)]
-            )
-            player1["rating"], player1["rd"], player1["vol"] = new_rating
-            
-            # Update player2's rating
-            new_rating = glicko.calculate_rating(
-                (player2["rating"], player2["rd"], player2["vol"]),
-                [(player1["rating"], player1["rd"], 1.0 - result)]
-            )
-            player2["rating"], player2["rd"], player2["vol"] = new_rating
-            
-            winner = player1_name if result == 1.0 else player2_name
-            print(f"{player1_name} vs {player2_name}: {winner} wins")
-        
-        # Track ratings after each round
+        vis.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
+
+    for rnd in range(1, 31):
+        print(f"\nRound {rnd}")
+        for pa, pb in pairs:
+            diff = players[pa]["true"] - players[pb]["true"]
+            win_p = 1.0 / (1.0 + math.exp(-diff / 400))
+            res_a = 1.0 if r.random() < win_p else 0.0
+            a_tuple = (players[pa]["rating"], players[pa]["rd"], players[pa]["vol"])
+            b_tuple = (players[pb]["rating"], players[pb]["rd"], players[pb]["vol"])
+            new_a, new_b = pair_update(system, a_tuple, b_tuple, res_a)
+            players[pa]["rating"], players[pa]["rd"], players[pa]["vol"] = new_a
+            players[pb]["rating"], players[pb]["rd"], players[pb]["vol"] = new_b
+            winner = pa if res_a else pb
+            print(f"{pa} vs {pb}: {winner} wins")
         for name, data in players.items():
-            visualizer.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-    
-    # Print ratings at specific intervals
-    visualizer.print_history_at_intervals([1, 5, 10, 20, 30])
-    
-    # Create comparison visualization
-    print("\nFinal ratings compared to true skill:")
+            vis.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
+
+    print("\nFinal ratings vs true skill:")
     for name, data in players.items():
-        comparison.add_comparison_with_explicit_values(
-            name, 
-            data["rating"], 
-            data["rd"], 
-            data["true_skill"]
-        )
-    
-    # Print comparison table
-    comparison.print_comparison_table()
-    
-    # Generate visualizations
-    visualizer.plot()
-    visualizer.save("glicko2_rating_convergence.png")
-    
-    comparison.plot_comparison()
-    comparison.save("glicko2_true_skill_comparison.png")
+        cmp_vis.add_comparison_with_explicit_values(name, data["rating"], data["rd"], data["true"])
+        print(f"{name}: {data['rating']:.1f} (true {data['true']})")
 
+    vis.plot(); vis.save("glicko2_convergence.png")
+    cmp_vis.plot_comparison(); cmp_vis.save("glicko2_true_skill_gap.png")
 
-def example_3_inactive_players(output_dir: str):
-    """
-    Shows how ratings change when players become inactive.
-    """
+# --------------------------------------------------------------------------- #
+# Example 3 – Inactive Players                                                 #
+# --------------------------------------------------------------------------- #
+
+def example_3_inactive(out_dir: str) -> None:
     print("\n=== EXAMPLE 3: INACTIVE PLAYERS ===")
-    
-    # Initialize rating system
-    glicko = get_rating_system("glicko2")
-    
-    # Set up visualizer
-    rating_viz = RatingHistoryVisualizer("Ratings of Inactive Players (Glicko2)", output_dir)
-    rd_viz = RatingHistoryVisualizer("Rating Deviation of Inactive Players (Glicko2)", output_dir)
-    
-    # Initial ratings for players - start with smaller RD for clarity
-    default_rating, _, default_vol = glicko.get_default_rating()
-    initial_rd = 150  # Smaller than default for clearer demonstration
-    
+    system = get_rating_system("glicko2")
+    r = rng(3)
+
+    rating_viz = RatingHistoryVisualizer("Inactive – Rating", out_dir)
+    rd_viz = RatingHistoryVisualizer("Inactive – RD", out_dir)
+
+    base = system.get_default_rating()
     players = {
-        "Active": {"rating": default_rating, "rd": initial_rd, "vol": default_vol},
-        "Occasional": {"rating": default_rating, "rd": initial_rd, "vol": default_vol},
-        "Inactive": {"rating": default_rating, "rd": initial_rd, "vol": default_vol},
+        "Active":     {"rating": base[0], "rd": 150, "vol": base[2]},
+        "Occasional": {"rating": base[0], "rd": 150, "vol": base[2]},
+        "Inactive":   {"rating": base[0], "rd": 150, "vol": base[2]},
     }
-    
-    # Print initial ratings
-    print("Initial ratings:")
+
+    # Initial track
     for name, data in players.items():
-        print_rating_info(name, data["rating"], data["rd"], data["vol"])
         rating_viz.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
         rd_viz.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-    
-    # Simulate 15 rating periods
+
+    opponent_rd = 150
     for period in range(1, 16):
-        print(f"\nPeriod {period}:")
-        
-        # Active player plays every period
-        active = players["Active"]
-        
-        # Create an opponent with random rating
-        opponent_rating = random.uniform(1300, 1700)
-        opponent_rd = 150
-        
-        # 50% chance of winning
-        result = 1.0 if random.random() > 0.5 else 0.0
-        
-        # Update active player
-        active["rating"], active["rd"], active["vol"] = glicko.calculate_rating(
-            (active["rating"], active["rd"], active["vol"]),
-            [(opponent_rating, opponent_rd, result)]
-        )
-        
-        # Occasional player plays every 5 periods
-        occasional = players["Occasional"]
+        # Active plays every period
+        a = players["Active"]
+        opp = r.uniform(1300, 1700)
+        res = 1.0 if r.random() < 0.5 else 0.0
+        new_a, _ = pair_update(system, (a["rating"], a["rd"], a["vol"]), (opp, opponent_rd, a["vol"]), res)
+        a["rating"], a["rd"], a["vol"] = new_a
+
+        # Occasional plays every 5th
+        o = players["Occasional"]
         if period % 5 == 0:
-            opponent_rating = random.uniform(1300, 1700)
-            result = 1.0 if random.random() > 0.5 else 0.0
-            
-            occasional["rating"], occasional["rd"], occasional["vol"] = glicko.calculate_rating(
-                (occasional["rating"], occasional["rd"], occasional["vol"]),
-                [(opponent_rating, opponent_rd, result)]
-            )
+            opp = r.uniform(1300, 1700)
+            res = 1.0 if r.random() < 0.5 else 0.0
+            update_o, _ = pair_update(system, (o["rating"], o["rd"], o["vol"]), (opp, opponent_rd, o["vol"]), res)
+            o["rating"], o["rd"], o["vol"] = update_o
         else:
-            # No matches, just update RD due to inactivity
-            occasional["rating"], occasional["rd"], occasional["vol"] = glicko.calculate_rating(
-                (occasional["rating"], occasional["rd"], occasional["vol"]), 
-                []
-            )
-        
-        # Inactive player never plays
-        inactive = players["Inactive"]
-        inactive["rating"], inactive["rd"], inactive["vol"] = glicko.calculate_rating(
-            (inactive["rating"], inactive["rd"], inactive["vol"]), 
-            []
-        )
-        
-        # Track ratings
+            no_game = (o["rating"], o["rd"], o["vol"])
+            o["rating"], o["rd"], o["vol"] = system.calculate_rating(no_game, [])
+
+        # Inactive never plays
+        i = players["Inactive"]
+        no_game_i = (i["rating"], i["rd"], i["vol"])
+        i["rating"], i["rd"], i["vol"] = system.calculate_rating(no_game_i, [])
+
+        # Track after each period
         for name, data in players.items():
             rating_viz.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
             rd_viz.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-        
-        # Print just a few periods to avoid excessive output
-        if period in [1, 5, 10, 15]:
-            print(f"Ratings after period {period}:")
+
+        if period in (1, 5, 10, 15):
+            print(f"\nAfter period {period}:")
             for name, data in players.items():
-                print_rating_info(name, data["rating"], data["rd"], data["vol"])
-    
-    # Generate visualizations
-    rating_viz.plot()
-    rating_viz.save("glicko2_inactive_players_ratings.png")
-    
-    # Focus on RD specifically for this example
-    rd_viz.plot(show_volatility=False)
-    rd_viz.save("glicko2_inactive_players_rd.png")
+                print(f"{name}: Rating={data['rating']:.1f}, RD={data['rd']:.1f}")
 
+    rating_viz.plot(); rating_viz.save("glicko2_inactive_ratings.png")
+    rd_viz.plot(show_volatility=False); rd_viz.save("glicko2_inactive_rd.png")
 
-def example_4_different_starting_ratings(output_dir: str):
-    """
-    Shows how players with different starting ratings converge.
-    """
+# --------------------------------------------------------------------------- #
+# Example 4 – Different Starting Ratings                                      #
+# --------------------------------------------------------------------------- #
+
+def example_4_starting(out_dir: str) -> None:
     print("\n=== EXAMPLE 4: DIFFERENT STARTING RATINGS ===")
-    
-    # Initialize rating system
-    glicko = get_rating_system("glicko2")
-    
-    # Set up visualizer
-    visualizer = RatingHistoryVisualizer("Different Starting Ratings (Glicko2)", output_dir)
-    
-    # Default values
-    _, default_rd, default_vol = glicko.get_default_rating()
-    
-    # Initial ratings for players with the same true skill
+    system = get_rating_system("glicko2")
+    r = rng(4)
+
+    vis = RatingHistoryVisualizer("Different Starting Ratings", out_dir)
+    cmp_vis = RatingComparisonVisualizer("Convergence to True Skill", out_dir)
+
+    _, base_rd, base_vol = system.get_default_rating()
     players = {
-        "Underrated": {"rating": 1200, "rd": default_rd, "vol": default_vol, "true_skill": 1500},
-        "Accurate": {"rating": 1500, "rd": 150, "vol": default_vol, "true_skill": 1500},
-        "Overrated": {"rating": 1800, "rd": default_rd, "vol": default_vol, "true_skill": 1500},
+        "Underrated": {"rating": 1200, "rd": base_rd, "vol": base_vol, "true": 1500},
+        "Accurate":   {"rating": 1500, "rd": 150,    "vol": base_vol, "true": 1500},
+        "Overrated":  {"rating": 1800, "rd": base_rd, "vol": base_vol, "true": 1500},
     }
-    
-    # Print initial ratings
-    print("Initial ratings (all players have the same true skill of 1500):")
+
     for name, data in players.items():
-        print_rating_info(name, data["rating"], data["rd"], data["vol"])
-        visualizer.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-    
-    # Simulate 20 rounds of matches
-    for round_num in range(1, 21):
-        print(f"\nRound {round_num}:")
-        
-        # Each player plays against a pool of opponents with evenly distributed skills
-        for name, player in players.items():
-            # Play 3 matches per round against opponents with true skills 1300, 1500, 1700
-            opponent_skills = [1300, 1500, 1700]
-            
-            outcomes = []
-            for opp_skill in opponent_skills:
-                # Determine match outcome based on true skill
-                skill_diff = player["true_skill"] - opp_skill
-                win_prob = 1.0 / (1.0 + math.exp(-skill_diff / 400.0))
-                result = 1.0 if random.random() < win_prob else 0.0
-                
-                # Assume opponent has accurate rating and moderate RD
-                outcomes.append((opp_skill, 150, result))
-            
-            # Update player's rating based on all 3 matches
-            player["rating"], player["rd"], player["vol"] = glicko.calculate_rating(
-                (player["rating"], player["rd"], player["vol"]),
-                outcomes
-            )
-        
-        # Track ratings
+        vis.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
+
+    for rnd in range(1, 21):
         for name, data in players.items():
-            visualizer.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
-    
-    # Print ratings at specific intervals
-    visualizer.print_history_at_intervals([1, 5, 10, 20])
-    
-    # Generate visualization
-    visualizer.plot()
-    visualizer.save("glicko2_different_starting_ratings.png")
-    
-    # Print final differences from true skill
-    print("\nFinal differences from true skill:")
-    comparison = RatingComparisonVisualizer("Convergence to True Skill (Glicko2)", output_dir)
-    
+            outcomes: List[Tuple[float, float, float]] = []
+            for opp_skill in (1300, 1500, 1700):
+                diff = data["true"] - opp_skill
+                res = 1.0 if r.random() < 1/(1+math.exp(-diff/400)) else 0.0
+                outcomes.append((opp_skill, 150, res))
+            new_vals = system.calculate_rating(
+                (data["rating"], data["rd"], data["vol"]), outcomes
+            )
+            data["rating"], data["rd"], data["vol"] = new_vals
+        for name, data in players.items():
+            vis.track_with_explicit_values(name, data["rating"], data["rd"], data["vol"])
+
+    vis.plot(); vis.save("glicko2_starting_ratings.png")
+
+    print("\nFinal difference from true skill:")
     for name, data in players.items():
-        comparison.add_comparison_with_explicit_values(
-            name, data["rating"], data["rd"], data["true_skill"]
-        )
-        print(f"{name}: Rating = {data['rating']:.1f}, "
-              f"Difference from true skill = {data['rating'] - data['true_skill']:.1f}")
-    
-    comparison.plot_comparison()
-    comparison.save("glicko2_starting_rating_convergence.png")
+        cmp_vis.add_comparison_with_explicit_values(name, data["rating"], data["rd"], data["true"])
+        diff = data["rating"] - data["true"]
+        print(f"{name}: {diff:+.1f}")
 
+    cmp_vis.plot_comparison(); cmp_vis.save("glicko2_starting_gap.png")
 
-def example_5_expected_outcomes(output_dir: str):
-    """
-    Demonstrates the expected outcome calculations.
-    """
+# --------------------------------------------------------------------------- #
+# Example 5 – Expected Outcomes                                               #
+# --------------------------------------------------------------------------- #
+
+def example_5_expected(out_dir: str) -> None:
     print("\n=== EXAMPLE 5: EXPECTED OUTCOMES ===")
-    
-    # Initialize rating system
-    glicko = get_rating_system("glicko2")
-    
-    # Set up visualizer
-    visualizer = ExpectedOutcomeVisualizer("Expected Win Probabilities (Glicko2)", output_dir)
-    
-    # Define some players with different ratings and RDs
+    system = get_rating_system("glicko2")
+    vis = ExpectedOutcomeVisualizer("Expected Win Probabilities", out_dir)
+
     scenarios = [
-        {"player1": {"name": "Equal", "rating": 1500, "rd": 30}, 
-         "player2": {"name": "Equal", "rating": 1500, "rd": 30}},
-        
-        {"player1": {"name": "Slightly Better", "rating": 1550, "rd": 30}, 
-         "player2": {"name": "Slightly Worse", "rating": 1450, "rd": 30}},
-        
-        {"player1": {"name": "Much Better", "rating": 1800, "rd": 30}, 
-         "player2": {"name": "Much Worse", "rating": 1200, "rd": 30}},
-        
-        {"player1": {"name": "Better but Uncertain", "rating": 1600, "rd": 200}, 
-         "player2": {"name": "Worse but Certain", "rating": 1400, "rd": 30}},
-        
-        {"player1": {"name": "Slightly Better", "rating": 1550, "rd": 30}, 
-         "player2": {"name": "Slightly Worse but Very Uncertain", "rating": 1450, "rd": 350}},
+        ("Equal", 1500, 30, "Equal", 1500, 30),
+        ("Slightly Better", 1550, 30, "Slightly Worse", 1450, 30),
+        ("Much Better", 1800, 30, "Much Worse", 1200, 30),
+        ("Better Uncertain", 1600, 200, "Worse Certain", 1400, 30),
+        ("Better vs Uncertain", 1550, 30, "Worse Uncertain", 1450, 350),
     ]
-    
-    # Calculate and print expected outcomes
-    print("Expected win probabilities:")
-    
-    for scenario in scenarios:
-        p1 = scenario["player1"]
-        p2 = scenario["player2"]
-        
-        # Calculate expected outcome
-        win_prob = glicko.expected_outcome(
-            (p1["rating"], p1["rd"]), 
-            (p2["rating"], p2["rd"])
-        )
-        
-        # Add to visualizer
-        visualizer.add_matchup_with_explicit_values(
-            p1["name"], p1["rating"], p1["rd"],
-            p2["name"], p2["rating"], p2["rd"],
-            win_prob
-        )
-        
-        print(f"{p1['name']} vs {p2['name']}: {win_prob:.4f} win probability")
-    
-    # Print table
-    visualizer.print_matchup_table()
-    
-    # Generate visualization
-    visualizer.plot_matchups()
-    visualizer.save("glicko2_expected_outcomes.png")
+    for p1, r1, rd1, p2, r2, rd2 in scenarios:
+        prob = system.expected_outcome((r1, rd1), (r2, rd2))
+        vis.add_matchup_with_explicit_values(p1, r1, rd1, p2, r2, rd2, prob)
+        print(f"{p1} ({r1}, RD={rd1}) vs {p2} ({r2}, RD={rd2}): {prob:.4f}")
 
+    vis.print_matchup_table()
+    vis.plot_matchups(); vis.save("glicko2_expected.png")
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Run Glicko2 rating system examples.')
-    parser.add_argument('--output-dir', type=str, default='output',
-                        help='Directory to save output files (default: output)')
-    parser.add_argument('--examples', type=str, nargs='+',
-                        choices=['1', '2', '3', '4', '5', 'all'],
-                        default=['all'],
-                        help='Examples to run (1-5 or all)')
+# --------------------------------------------------------------------------- #
+# CLI & main                                                                 #
+# --------------------------------------------------------------------------- #
+EXAMPLES = {
+    1: example_1_basic,
+    2: example_2_convergence,
+    3: example_3_inactive,
+    4: example_4_starting,
+    5: example_5_expected,
+}
+
+def parse_cli() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Glicko-2 demo suite",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+            Examples:
+              uv run debug/glicko2_example.py -e 1 4
+              uv run debug/glicko2_example.py -e all
+        """),
+    )
+    parser.add_argument(
+        "-e", "--examples",
+        nargs="+",
+        choices=[*map(str, EXAMPLES), "all"],
+        default=["all"],
+        help="Examples to run",
+    )
+    parser.add_argument(
+        "-o", "--output-dir",
+        default="output",
+        help="Directory for output PNGs",
+    )
     return parser.parse_args()
 
 
-def main():
-    """Run the Glicko2 examples."""
-    # Parse command line arguments
-    args = parse_args()
-    
-    # Create output directory if it doesn't exist
+def main() -> None:
+    args = parse_cli()
+    want = {int(x) for x in args.examples} if "all" not in args.examples else set(EXAMPLES)
     os.makedirs(args.output_dir, exist_ok=True)
-    
-    print(f"Results will be saved to: {os.path.abspath(args.output_dir)}")
-    
-    # Print available rating systems for debugging
-    print(f"Available rating systems: {', '.join(RatingSystemRegistry.list_available())}")
-    
-    # Seed random for reproducibility
-    random.seed(42)
-    
-    # Determine which examples to run
-    examples_to_run = set()
-    if 'all' in args.examples:
-        examples_to_run = {1, 2, 3, 4, 5}
-    else:
-        for example in args.examples:
-            examples_to_run.add(int(example))
-    
-    # Run examples
-    if 1 in examples_to_run:
-        example_1_basic(args.output_dir)
-    
-    if 2 in examples_to_run:
-        example_2_rating_convergence(args.output_dir)
-    
-    if 3 in examples_to_run:
-        example_3_inactive_players(args.output_dir)
-    
-    if 4 in examples_to_run:
-        example_4_different_starting_ratings(args.output_dir)
-    
-    if 5 in examples_to_run:
-        example_5_expected_outcomes(args.output_dir)
-    
-    print(f"\nExamples complete. Visualization charts have been saved to: {os.path.abspath(args.output_dir)}")
-
+    print(f"Saving to {os.path.abspath(args.output_dir)}")
+    print("Available systems:", ", ".join(RatingSystemRegistry.list_available()))
+    for idx in sorted(want):
+        EXAMPLES[idx](args.output_dir)
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()
